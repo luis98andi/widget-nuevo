@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Enviar a voz</title>
+    <link rel="stylesheet" href="css/style.css" />
+    <style>
+      body {
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: linear-gradient(135deg, #0f172a 0%, #1d4ed8 100%);
+      }
+
+      .mobile-card {
+        width: min(92vw, 420px);
+      }
+    </style>
+  </head>
+  <body>
+    <main class="widget mobile-card">
+      <div class="badge">Enviar desde Android</div>
+      <h1>Texto para leer</h1>
+      <label for="mobileText">Escribe el texto que quieres que lea tu PC</label>
+      <textarea id="mobileText" placeholder="Ejemplo: hola, ya recibí este mensaje desde mi celular..."></textarea>
+
+      <div class="actions">
+        <button id="sendBtn" class="primary">Enviar a la PC</button>
+      </div>
+
+      <p id="mobileStatus" class="status">Listo para enviar.</p>
+    </main>
+
+    <script src="js/mobile.js"></script>
+  </body>
+</html>

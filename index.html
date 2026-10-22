@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>ESCUCHA POR VOZ</title>
+    <link rel="stylesheet" href="css/style.css" />
+  </head>
+  <body>
+    <div class="gadget">
+      <div class="titulo">ESCUCHA POR VOZ</div>
+      <textarea id="texto" rows="3" placeholder="Escribe aquí..."></textarea>
+      <div class="botones">
+        <button id="leerBtn">Leer</button>
+        <button id="stopBtn" class="secondary">Detener</button>
+      </div>
+      <div id="status" class="status">Listo</div>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="js/script.js"></script>
+  </body>
+</html>

@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<gadget>
+  <name>Mi Gadget TTS</name>
+  <namespace>luis.tts</namespace>
+  <version>1.0.0.0</version>
+  <author name="Luis" />
+  <description>Convierte texto en voz automáticamente</description>
+  <icons>
+    <icon height="48" width="48" src="icon.png"/>
+  </icons>
+  <hosts>
+    <host name="sidebar">
+      <base type="html" apiVersion="1.0.0" src="index.html"/>
+      <permissions>full</permissions>
+      <platform minPlatformVersion="1.0"/>
+      <defaultImage src="icon.png"/>
+    </host>
+  </hosts>
+</gadget>

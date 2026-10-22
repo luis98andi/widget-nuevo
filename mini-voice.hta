@@ -1,0 +1,468 @@
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+  <title>Mini Voice</title>
+  <HTA:APPLICATION
+    APPLICATIONNAME="Mini Voice"
+    ID="MiniVoice"
+    BORDER="thin"
+    BORDERSTYLE="normal"
+    CAPTION="yes"
+    CONTEXTMENU="no"
+    INNERBORDER="no"
+    MAXIMIZEBUTTON="no"
+    MINIMIZEBUTTON="no"
+    SCROLL="no"
+    SINGLEINSTANCE="yes"
+    WINDOWSTATE="normal"
+    SHOWINTASKBAR="yes"
+  />
+  <style>
+    body {
+      margin: 0;
+      padding: 6px;
+      background: #0f172a;
+      color: #e2e8f0;
+      font-family: Arial, sans-serif;
+      overflow: hidden;
+    }
+
+    #panel {
+      width: 230px;
+      height: 178px;
+      background: #111827;
+      border: 1px solid #60a5fa;
+      border-radius: 8px;
+      padding: 8px;
+      box-shadow: 0 8px 18px rgba(0,0,0,0.35);
+    }
+
+    #titulo {
+      font-size: 11px;
+      font-weight: bold;
+      text-align: center;
+      color: #dbeafe;
+      letter-spacing: 1px;
+      margin-bottom: 6px;
+    }
+
+    textarea {
+      width: 100%;
+      height: 48px;
+      resize: none;
+      border: 1px solid #94a3b8;
+      border-radius: 5px;
+      padding: 5px;
+      font-size: 12px;
+      background: white;
+      color: #111827;
+      outline: none;
+    }
+
+    .volume {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 5px;
+      font-size: 10px;
+    }
+
+    #volumeSlider {
+      flex: 1;
+      width: 130px;
+      height: 16px;
+      margin: 0;
+    }
+
+    #volumeValue {
+      width: 28px;
+      text-align: right;
+    }
+
+    .buttons {
+      margin-top: 8px;
+      display: flex;
+      gap: 6px;
+    }
+
+    button {
+      border: 1px solid #60a5fa;
+      background: #2563eb;
+      color: white;
+      border-radius: 4px;
+      font-size: 11px;
+      height: 24px;
+      cursor: pointer;
+      padding: 0 10px;
+      font-weight: bold;
+    }
+
+    button.secondary {
+      background: #374151;
+      border-color: #9ca3af;
+    }
+
+    #status {
+      margin-top: 7px;
+      font-size: 10px;
+      color: #bfdbfe;
+      text-align: center;
+      height: 14px;
+    }
+  </style>
+</head>
+<body onload="init()">
+  <div id="panel">
+    <div id="titulo">ESCUCHA POR VOZ</div>
+    <textarea id="texto" placeholder="Texto..."></textarea>
+    <div class="volume">
+      <label for="volumeSlider">Volumen</label>
+      <input id="volumeSlider" type="range" min="0" max="100" value="100" />
+      <span id="volumeValue">100%</span>
+    </div>
+    <div class="buttons">
+      <button id="leerBtn">Leer</button>
+      <button id="stopBtn" class="secondary">Detener</button>
+    </div>
+    <div id="status">Listo</div>
+  </div>
+
+  <script language="javascript">
+    var voice = null;
+    var lastText = '';
+    var pollTimer = null;
+    var volumeTimer = null;
+    var speechTimer = null;
+    var volumeSignalBase = null;
+    var voiceVolume = 100;
+    var volumeStartedAt = 0;
+    var finishMessage = '';
+    var cancelledBeforeSpeech = false;
+    var queuedText = '';
+    var fileSystem = null;
+    var shell = null;
+
+    function setStatus(message) {
+      document.getElementById('status').innerText = message;
+    }
+
+    function trimText(value) {
+      if (value === null || value === undefined) {
+        return '';
+      }
+      return String(value).replace(/^\s+|\s+$/g, '');
+    }
+
+    function setVoiceVolume(value) {
+      voiceVolume = parseInt(value, 10);
+      if (isNaN(voiceVolume)) {
+        voiceVolume = 100;
+      }
+      voiceVolume = Math.max(0, Math.min(100, voiceVolume));
+      document.getElementById('volumeValue').innerText = voiceVolume + '%';
+    }
+
+    function markerPath(marker) {
+      return volumeSignalBase + '.' + marker;
+    }
+
+    function readMarker(marker) {
+      var path = markerPath(marker);
+      if (!fileSystem.FileExists(path)) {
+        return '';
+      }
+      var stream = fileSystem.OpenTextFile(path, 1, false);
+      var value = stream.ReadAll();
+      stream.Close();
+      return value;
+    }
+
+    function writeMarker(marker) {
+      var path = markerPath(marker);
+      if (fileSystem.FileExists(path)) {
+        fileSystem.DeleteFile(path, true);
+      }
+      var stream = fileSystem.CreateTextFile(path, true, false);
+      stream.Write('done');
+      stream.Close();
+    }
+
+    function removeVolumeMarkers() {
+      var markers = ['ready', 'done', 'restored', 'error'];
+      for (var i = 0; i < markers.length; i++) {
+        var path = markerPath(markers[i]);
+        if (fileSystem.FileExists(path)) {
+          fileSystem.DeleteFile(path, true);
+        }
+      }
+      volumeSignalBase = null;
+      document.getElementById('volumeSlider').disabled = false;
+    }
+
+    function startVolumeHelper() {
+      var pagePath = decodeURIComponent(window.location.pathname);
+      pagePath = pagePath.replace(/^\/([A-Za-z]:)/, '$1');
+      var folder = fileSystem.GetParentFolderName(pagePath);
+      var scriptPath = fileSystem.BuildPath(folder, 'mini-voice-volume.ps1');
+      var powershellPath = shell.ExpandEnvironmentStrings('%SystemRoot%\\System32\\WindowsPowerShell\\v1.0\\powershell.exe');
+
+      if (!fileSystem.FileExists(scriptPath)) {
+        throw new Error('No se encontro mini-voice-volume.ps1 junto al HTA.');
+      }
+      if (!fileSystem.FileExists(powershellPath)) {
+        throw new Error('No se encontro Windows PowerShell.');
+      }
+
+      volumeSignalBase = fileSystem.BuildPath(
+        shell.ExpandEnvironmentStrings('%TEMP%'),
+        'MiniVoice-' + new Date().getTime() + '-' + Math.floor(Math.random() * 1000000)
+      );
+      volumeStartedAt = new Date().getTime();
+
+      var command = '"' + powershellPath + '" -NoProfile -ExecutionPolicy Bypass -File "' +
+        scriptPath + '" -SignalBase "' + volumeSignalBase + '" -Volume ' + voiceVolume;
+      shell.Run(command, 0, false);
+    }
+
+    function finishRead(message) {
+      finishMessage = message;
+      if (speechTimer) {
+        clearInterval(speechTimer);
+        speechTimer = null;
+      }
+      try {
+        writeMarker('done');
+        setStatus('Restaurando volumen...');
+        volumeTimer = setInterval(waitForRestore, 100);
+      } catch (e) {
+        setStatus('No se pudo restaurar el volumen: ' + e.message);
+      }
+    }
+
+    function waitForRestore() {
+      try {
+        var error = readMarker('error');
+        if (error) {
+          clearInterval(volumeTimer);
+          volumeTimer = null;
+          setStatus(error);
+          removeVolumeMarkers();
+          return;
+        }
+        if (readMarker('restored')) {
+          var nextText = queuedText;
+          queuedText = '';
+          clearInterval(volumeTimer);
+          volumeTimer = null;
+          removeVolumeMarkers();
+          setStatus(finishMessage);
+          if (nextText) {
+            setTimeout(function () {
+              leerTexto(nextText);
+            }, 100);
+          }
+        }
+      } catch (e) {
+        clearInterval(volumeTimer);
+        volumeTimer = null;
+        setStatus('Error verificando la restauracion del volumen: ' + e.message);
+      }
+    }
+
+    function pollVolumeReady(text) {
+      try {
+        var error = readMarker('error');
+        if (error) {
+          clearInterval(volumeTimer);
+          volumeTimer = null;
+          finishMessage = 'No se pudo ajustar el volumen: ' + error;
+          if (readMarker('restored')) {
+            removeVolumeMarkers();
+            setStatus(finishMessage);
+          } else {
+            setStatus('Error al ajustar; restaurando volumen...');
+            volumeTimer = setInterval(waitForRestore, 100);
+          }
+          return;
+        }
+
+        if (readMarker('ready')) {
+          clearInterval(volumeTimer);
+          volumeTimer = null;
+          if (cancelledBeforeSpeech) {
+            finishRead('Detenido');
+            return;
+          }
+          speakAtCurrentVolume(text);
+          return;
+        }
+
+        if (new Date().getTime() - volumeStartedAt > 15000) {
+          clearInterval(volumeTimer);
+          volumeTimer = null;
+          finishRead('No se pudo iniciar el control de volumen.');
+        }
+      } catch (e) {
+        clearInterval(volumeTimer);
+        volumeTimer = null;
+        setStatus('Error preparando el volumen: ' + e.message);
+        if (volumeSignalBase) {
+          try {
+            writeMarker('done');
+            finishMessage = 'Error preparando el volumen: ' + e.message;
+            volumeTimer = setInterval(waitForRestore, 100);
+          } catch (signalError) {
+            setStatus('Error preparando o restaurando el volumen: ' + e.message + ' ' + signalError.message);
+          }
+        }
+      }
+    }
+
+    function init() {
+      fileSystem = new ActiveXObject('Scripting.FileSystemObject');
+      shell = new ActiveXObject('WScript.Shell');
+      document.getElementById('volumeSlider').onchange = function () {
+        setVoiceVolume(this.value);
+      };
+      document.getElementById('volumeSlider').oninput = function () {
+        setVoiceVolume(this.value);
+      };
+
+      document.getElementById('leerBtn').onclick = function () {
+        var text = trimText(document.getElementById('texto').value);
+        if (!text) {
+          setStatus('Sin texto');
+          return;
+        }
+        leerTexto(text);
+      };
+
+      document.getElementById('stopBtn').onclick = function () {
+        if (volumeSignalBase && !speechTimer) {
+          cancelledBeforeSpeech = true;
+          try {
+            if (volumeTimer) {
+              clearInterval(volumeTimer);
+              volumeTimer = null;
+            }
+            writeMarker('done');
+            setStatus('Cancelando lectura...');
+            volumeTimer = setInterval(waitForRestore, 100);
+          } catch (e) {
+            setStatus('No se pudo cancelar: ' + e.message);
+          }
+          return;
+        }
+        if (!speechTimer) {
+          setStatus('No hay lectura activa');
+          return;
+        }
+        try {
+          voice.Speak('', 2);
+          finishRead('Detenido');
+        } catch (e) {
+          setStatus('No se pudo detener: ' + e.message);
+        }
+      };
+
+      window.focus();
+      try {
+        window.resizeTo(270, 210);
+      } catch (e) {}
+
+      setStatus('Listo');
+      pollTimer = setTimeout(checkRemoteText, 1000);
+    }
+
+    function leerTexto(text) {
+      if (!text) return;
+
+      var textoReal = trimText(text);
+      if (!textoReal) {
+        setStatus('Sin texto');
+        return;
+      }
+
+      if (volumeSignalBase) {
+        queuedText = textoReal;
+        setStatus('Texto en espera; se leerá al terminar el actual.');
+        return;
+      }
+
+      try {
+        if (!voice) {
+          voice = new ActiveXObject('SAPI.SpVoice');
+        }
+        voice.Volume = 100;
+        voice.Rate = 0;
+        document.getElementById('texto').value = textoReal;
+        cancelledBeforeSpeech = false;
+        startVolumeHelper();
+        document.getElementById('volumeSlider').disabled = true;
+        setStatus('Preparando el volumen...');
+        volumeTimer = setInterval(function () {
+          pollVolumeReady(textoReal);
+        }, 100);
+      } catch (e) {
+        if (volumeSignalBase) {
+          removeVolumeMarkers();
+        }
+        setStatus('No se pudo preparar la lectura: ' + e.message);
+      }
+    }
+
+    function speakAtCurrentVolume(text) {
+      try {
+        voice.Speak(text, 3);
+        setStatus('Leyendo al ' + voiceVolume + '%...');
+        speechTimer = setInterval(function () {
+          try {
+            if (voice.Status.RunningState === 0) {
+              finishRead('Listo');
+            }
+          } catch (e) {
+            finishRead('Listo');
+          }
+        }, 150);
+      } catch (e) {
+        finishRead('No se pudo leer el texto: ' + e.message);
+      }
+    }
+
+    function checkRemoteText() {
+      var xhr;
+      try {
+        xhr = new ActiveXObject('MSXML2.XMLHTTP');
+        xhr.onreadystatechange = function () {
+          if (xhr.readyState !== 4) {
+            return;
+          }
+
+          if (xhr.status === 200) {
+            try {
+              var response = eval('(' + xhr.responseText + ')');
+              if (response && response.text && response.text !== lastText) {
+                lastText = response.text;
+                document.getElementById('texto').value = response.text;
+                leerTexto(response.text);
+              }
+            } catch (e) {
+              setStatus('Respuesta no valida');
+            }
+          } else {
+            setStatus('Sin servidor');
+          }
+
+          pollTimer = setTimeout(checkRemoteText, 2000);
+        };
+        xhr.open('GET', 'http://localhost:3000/api/last-message', true);
+        xhr.send();
+      } catch (e) {
+        setStatus('Sin servidor');
+        pollTimer = setTimeout(checkRemoteText, 2000);
+      }
+    }
+  </script>
+</body>
+</html>
